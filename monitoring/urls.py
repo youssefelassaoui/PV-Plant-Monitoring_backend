@@ -2,7 +2,7 @@
 
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
-from .views import PVSystemViewSet, ElectricalDataViewSet, MeteorologicalDataViewSet, UserCreate, create_simple_user, calculate_pvwatts, calculate_system_scores, UserViewSet, CustomTokenObtainPairView
+from .views import PVSystemViewSet, ElectricalDataViewSet, MeteorologicalDataViewSet, UserCreate, create_simple_user, calculate_pvwatts, calculate_system_scores, UserViewSet, CustomTokenObtainPairView, get_total_calculated_power, get_system_totals
 from rest_framework_simplejwt.views import (
     TokenRefreshView,
     TokenVerifyView,
@@ -24,4 +24,8 @@ urlpatterns = [
     path('api/token/verify/', TokenVerifyView.as_view(), name='token_verify'),
     path('api/pvsystems/<int:system_id>/calculate/', calculate_pvwatts, name='calculate_pvwatts'),
     path('api/pvsystems/scores/', calculate_system_scores, name='system_scores'),
+    path('api/totals-p_dc/', get_total_calculated_power, name='get_total_calculated_power'),  
+    path('api/system-totals/', get_system_totals, name='system_totals'),
+
+
 ]

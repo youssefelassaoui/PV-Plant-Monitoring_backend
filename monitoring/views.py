@@ -255,3 +255,133 @@ def calculate_system_scores(request):
         })
 
     return Response(scores)
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def get_total_calculated_power(request):
+    systems = PVSystem.objects.all()
+    system_powers = []
+
+    for system in systems:
+        electrical_data = ElectricalData.objects.filter(system=system)
+        if not electrical_data.exists():
+            continue
+
+        start_time = electrical_data.order_by('time').first().time
+        end_time = electrical_data.order_by('-time').first().time
+
+        meteorological_data = MeteorologicalData.objects.filter(time__range=(start_time, end_time))
+        if not meteorological_data.exists():
+            continue
+
+        electrical_df = pd.DataFrame.from_records(electrical_data.values())
+        meteorological_df = pd.DataFrame.from_records(meteorological_data.values())
+
+        electrical_df.set_index('time', inplace=True)
+        meteorological_df.set_index('time', inplace=True)
+
+        electrical_df = electrical_df.resample('5min').mean().interpolate()
+        meteorological_df = meteorological_df.resample('5min').mean().interpolate()
+
+        merged_df = pd.merge_asof(electrical_df, meteorological_df, left_index=True, right_index=True)
+
+        p_stc = system.capacity * 1000  # Convert kW to W
+        temp_coeff = -0.005  # Assuming a typical temperature coefficient
+
+        total_power = 0
+
+        for _, row in merged_df.iterrows():
+            gti = row['gti']
+            air_temp = row['air_temp']
+            wind_speed = row['wind_speed']
+
+            if gti <= 0:
+                continue
+
+            temp_cell = pvlib.temperature.pvsyst_cell(
+                poa_global=gti,
+                temp_air=air_temp,
+                wind_speed=wind_speed
+            )
+
+            p_dc = pvlib.pvsystem.pvwatts_dc(gti, temp_cell, p_stc, gamma_pdc=temp_coeff)
+            if np.isfinite(p_dc) and not np.isnan(p_dc):
+                total_power += p_dc
+
+        system_powers.append({
+            'system_id': system.id,
+            'name': system.name,
+            'total_calculated_power': total_power
+        })
+
+    return Response(system_powers)
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def get_system_totals(request):
+    systems = PVSystem.objects.all()
+    system_totals = []
+
+    for system in systems:
+        electrical_data = ElectricalData.objects.filter(system=system)
+        if not electrical_data.exists():
+            continue
+
+        start_time = electrical_data.order_by('time').first().time
+        end_time = electrical_data.order_by('-time').first().time
+
+        meteorological_data = MeteorologicalData.objects.filter(
+            time__range=(start_time, end_time)
+        )
+        if not meteorological_data.exists():
+            continue
+
+        electrical_df = pd.DataFrame.from_records(electrical_data.values())
+        meteorological_df = pd.DataFrame.from_records(meteorological_data.values())
+
+        electrical_df.set_index('time', inplace=True)
+        meteorological_df.set_index('time', inplace=True)
+
+        electrical_df = electrical_df.resample('5min').mean().interpolate()
+        meteorological_df = meteorological_df.resample('5min').mean().interpolate()
+
+        merged_df = pd.merge_asof(electrical_df, meteorological_df, left_index=True, right_index=True)
+
+        p_stc = system.capacity * 1000  # Convert kW to W
+        temp_coeff = -0.005  # Assuming a typical temperature coefficient
+        total_calculated_power = 0
+
+        for _, row in merged_df.iterrows():
+            gti = row['gti']
+            air_temp = row['air_temp']
+            wind_speed = row['wind_speed']
+
+            if gti <= 0:
+                continue
+
+            temp_cell = pvlib.temperature.pvsyst_cell(
+                poa_global=gti,
+                temp_air=air_temp,
+                wind_speed=wind_speed
+            )
+
+            p_dc = pvlib.pvsystem.pvwatts_dc(gti, temp_cell, p_stc, gamma_pdc=temp_coeff)
+            if np.isfinite(p_dc) and not np.isnan(p_dc):
+                total_calculated_power += p_dc
+
+        total_voltage = electrical_data.aggregate(total=Sum('u_dc'))['total'] or 0
+        total_current_t1 = electrical_data.aggregate(total=Sum('t1'))['total'] or 0
+        total_gti = meteorological_data.aggregate(total=Sum('gti'))['total'] or 0
+        total_air_temp = meteorological_data.aggregate(total=Sum('air_temp'))['total'] or 0
+
+        system_totals.append({
+            'system_id': system.id,
+            'name': system.name,
+            'total_voltage': total_voltage,
+            'total_calculated_power': total_calculated_power,
+            'total_current_t1': total_current_t1,
+            'total_gti': total_gti,
+            'total_air_temp': total_air_temp,
+        })
+
+    return Response(system_totals)
